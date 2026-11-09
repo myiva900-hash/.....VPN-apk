@@ -232,6 +232,11 @@ private fun LogItemRow(entry: LogEntry) {
         LogLevel.ERROR -> VpnErrorRed
         LogLevel.WARNING -> Color(0xFFF97316)
         LogLevel.TRAFFIC -> VpnCyanAccent
+        LogLevel.DNS -> Color(0xFFA855F7)
+        LogLevel.TCP -> Color(0xFF3B82F6)
+        LogLevel.TLS -> Color(0xFFEC4899)
+        LogLevel.AUTH -> Color(0xFFEAB308)
+        LogLevel.TUNNEL -> Color(0xFF06B6D4)
         LogLevel.INFO -> Color(0xFF38BDF8)
     }
 

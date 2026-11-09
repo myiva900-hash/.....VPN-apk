@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -332,6 +333,29 @@ fun HomeScreen(
                                         }
                                     )
                                 }
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = null,
+                                                tint = VpnRedPrimary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "+ Add Custom Server...",
+                                                fontWeight = FontWeight.Bold,
+                                                color = VpnRedPrimary,
+                                                fontSize = 13.sp
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        showServerDialog = false
+                                        viewModel.openAddServer()
+                                    }
+                                )
                             }
                         }
 
@@ -756,7 +780,7 @@ fun HomeScreen(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { onNavigate(AppScreen.SERVERS) }
+                        .clickable { onNavigate(AppScreen.SERVER_VALIDATION) }
                         .testTag("action_server_ping"),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)

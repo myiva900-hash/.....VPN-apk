@@ -30,6 +30,7 @@ import com.example.ui.VpnViewModel
 import com.example.ui.components.AppTopBar
 import com.example.ui.components.NavDrawerContent
 import com.example.ui.screens.AboutScreen
+import com.example.ui.screens.AddCustomServerScreen
 import com.example.ui.screens.DnsTunnelScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.HostSniScreen
@@ -37,6 +38,7 @@ import com.example.ui.screens.ImportExportScreen
 import com.example.ui.screens.LogScreen
 import com.example.ui.screens.PayloadGeneratorScreen
 import com.example.ui.screens.ServerManagementScreen
+import com.example.ui.screens.ServerValidationScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.MutigandaVpnTheme
 import kotlinx.coroutines.launch
@@ -153,6 +155,14 @@ class MainActivity : ComponentActivity() {
                                 onBack = { viewModel.navigateBack() }
                             )
                             AppScreen.SERVERS -> ServerManagementScreen(
+                                viewModel = viewModel,
+                                onBack = { viewModel.navigateBack() }
+                            )
+                            AppScreen.ADD_CUSTOM_SERVER -> AddCustomServerScreen(
+                                viewModel = viewModel,
+                                onBack = { viewModel.navigateBack() }
+                            )
+                            AppScreen.SERVER_VALIDATION -> ServerValidationScreen(
                                 viewModel = viewModel,
                                 onBack = { viewModel.navigateBack() }
                             )

@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Dns
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.DividerDefaults
@@ -166,6 +168,28 @@ fun NavDrawerContent(
                 testTag = "drawer_item_servers",
                 onClick = {
                     onNavigate(AppScreen.SERVERS)
+                    onCloseDrawer()
+                }
+            )
+
+            DrawerItem(
+                icon = Icons.Default.Add,
+                label = "Add Custom Server",
+                selected = currentScreen == AppScreen.ADD_CUSTOM_SERVER,
+                testTag = "drawer_item_add_server",
+                onClick = {
+                    onNavigate(AppScreen.ADD_CUSTOM_SERVER)
+                    onCloseDrawer()
+                }
+            )
+
+            DrawerItem(
+                icon = Icons.Default.NetworkCheck,
+                label = "Server Validation & VPS",
+                selected = currentScreen == AppScreen.SERVER_VALIDATION,
+                testTag = "drawer_item_validation",
+                onClick = {
+                    onNavigate(AppScreen.SERVER_VALIDATION)
                     onCloseDrawer()
                 }
             )

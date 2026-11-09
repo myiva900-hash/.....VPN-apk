@@ -64,7 +64,7 @@ data class VpnServer(
                 location = "Frankfurt",
                 countryCode = "DE",
                 flag = "🇩🇪",
-                ip = "198.51.100.24",
+                ip = "de-fra.vpn.mutigandayvan.net",
                 pingMs = 38
             ),
             VpnServer(

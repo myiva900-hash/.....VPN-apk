@@ -17,14 +17,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,8 +37,8 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -56,6 +58,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.local.CustomServerProfile
 import com.example.model.VpnServer
 import com.example.ui.VpnViewModel
 import com.example.ui.theme.VpnConnectedGreen
@@ -71,13 +74,10 @@ fun ServerManagementScreen(
 
     val servers by viewModel.servers.collectAsState()
     val config by viewModel.config.collectAsState()
+    val customProfiles by viewModel.customProfiles.collectAsState(initial = emptyList())
     val context = LocalContext.current
 
-    var showAddDialog by remember { mutableStateOf(false) }
-    var newServerName by remember { mutableStateOf("") }
-    var newServerIp by remember { mutableStateOf("") }
-    var newServerLocation by remember { mutableStateOf("") }
-    var newServerPort by remember { mutableStateOf("443") }
+    var serverToDelete by remember { mutableStateOf<VpnServer?>(null) }
 
     Scaffold(
         topBar = {
@@ -101,7 +101,7 @@ fun ServerManagementScreen(
                 actions = {
                     IconButton(
                         onClick = {
-                            Toast.makeText(context, "Ping refreshed for all servers!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Latency refreshed for all ${servers.size} servers!", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.testTag("ping_test_button")
                     ) {
@@ -117,12 +117,12 @@ fun ServerManagementScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showAddDialog = true },
+                onClick = { viewModel.openAddServer() },
                 containerColor = VpnRedPrimary,
                 contentColor = Color.White,
                 modifier = Modifier.testTag("add_custom_server_fab")
             ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "Add Server")
+                Icon(imageVector = Icons.Default.Add, contentDescription = "Add Custom Server")
             }
         }
     ) { innerPadding ->
@@ -132,152 +132,215 @@ fun ServerManagementScreen(
                 .padding(innerPadding)
                 .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(servers) { server ->
+            // Header Info Card
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = VpnRedPrimary.copy(alpha = 0.08f)
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Storage,
+                            contentDescription = null,
+                            tint = VpnRedPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Select or Manage VPN Servers",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = VpnRedPrimary
+                            )
+                            Text(
+                                text = "Add private VPS gateways with OpenVPN, WireGuard, SSH, or Direct TLS. Custom profiles persist locally in Room with Keystore protection.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Server items
+            items(servers, key = { it.id }) { server ->
                 val isSelected = server.id == config.selectedServerId
+                val matchingProfile: CustomServerProfile? = customProfiles.find { it.id == server.id }
+
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable {
                             viewModel.setServer(server)
-                            Toast.makeText(context, "Selected ${server.name}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Selected: ${server.name}", Toast.LENGTH_SHORT).show()
                         }
                         .testTag("server_item_${server.id}"),
                     colors = CardDefaults.cardColors(
                         containerColor = if (isSelected) VpnRedPrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
                     ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(14.dp)
                     ) {
-                        Text(text = server.flag, fontSize = 24.sp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = server.name,
-                                fontSize = 15.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                color = if (isSelected) VpnRedPrimary else MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "${server.location} • ${server.ip}",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "${server.pingMs} ms",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (server.pingMs < 50) VpnConnectedGreen else VpnRedPrimary
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Selected",
-                                    tint = VpnConnectedGreen,
-                                    modifier = Modifier.size(20.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = server.flag, fontSize = 24.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = server.name,
+                                        fontSize = 15.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        color = if (isSelected) VpnRedPrimary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (server.isCustom) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            color = VpnRedPrimary.copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = matchingProfile?.vpnProtocol ?: "CUSTOM",
+                                                color = VpnRedPrimary,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${server.location} • ${server.ip}",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (server.isCustom) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                IconButton(
-                                    onClick = { viewModel.removeServer(server.id) },
-                                    modifier = Modifier.size(28.dp)
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "${server.pingMs} ms",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (server.pingMs < 50) VpnConnectedGreen else VpnRedPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Selected",
+                                        tint = VpnConnectedGreen,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Edit / Delete buttons for custom servers
+                        if (server.isCustom) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        if (matchingProfile != null) {
+                                            viewModel.openEditServer(matchingProfile)
+                                        } else {
+                                            // Fallback profile representation if created via legacy add
+                                            val fallback = CustomServerProfile(
+                                                id = server.id,
+                                                serverName = server.name,
+                                                hostOrIp = server.ip,
+                                                port = server.supportedPorts.firstOrNull() ?: 443,
+                                                location = server.location,
+                                                countryCode = server.countryCode,
+                                                flag = server.flag
+                                            )
+                                            viewModel.openEditServer(fallback)
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("edit_server_${server.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Profile",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Edit", fontSize = 12.sp)
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                TextButton(
+                                    onClick = { serverToDelete = server },
+                                    modifier = Modifier.testTag("delete_server_${server.id}")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete custom server",
+                                        contentDescription = "Delete Profile",
                                         tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Delete", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }
                     }
                 }
             }
+
+            item {
+                Spacer(modifier = Modifier.height(60.dp))
+            }
         }
     }
 
-    // Add Custom Server Dialog
-    if (showAddDialog) {
+    // Delete confirmation dialog
+    serverToDelete?.let { target ->
         AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("Add Custom Server", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { serverToDelete = null },
+            title = { Text("Delete Server Profile", fontWeight = FontWeight.Bold) },
             text = {
-                Column {
-                    OutlinedTextField(
-                        value = newServerName,
-                        onValueChange = { newServerName = it },
-                        label = { Text("Server Name") },
-                        placeholder = { Text("e.g. My Private Gateway") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = newServerIp,
-                        onValueChange = { newServerIp = it },
-                        label = { Text("Server IP or Domain") },
-                        placeholder = { Text("e.g. 198.51.100.99") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = newServerLocation,
-                        onValueChange = { newServerLocation = it },
-                        label = { Text("Location City") },
-                        placeholder = { Text("e.g. Dallas, TX") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = newServerPort,
-                        onValueChange = { newServerPort = it },
-                        label = { Text("Default Port") },
-                        placeholder = { Text("443") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                }
+                Text("Are you sure you want to delete '${target.name}' (${target.ip})? This cannot be undone.")
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val port = newServerPort.toIntOrNull() ?: 443
-                        viewModel.addCustomServer(
-                            name = newServerName,
-                            ip = newServerIp,
-                            location = newServerLocation,
-                            countryCode = "CUSTOM",
-                            port = port
-                        )
-                        showAddDialog = false
-                        newServerName = ""
-                        newServerIp = ""
-                        newServerLocation = ""
-                        Toast.makeText(context, "Custom server added!", Toast.LENGTH_SHORT).show()
+                        viewModel.deleteCustomProfile(target.id)
+                        serverToDelete = null
+                        Toast.makeText(context, "Deleted ${target.name}", Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = VpnRedPrimary)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Add Server")
+                    Text("Delete")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) {
-                    Text("Cancel", color = VpnRedPrimary)
+                TextButton(onClick = { serverToDelete = null }) {
+                    Text("Cancel")
                 }
             }
         )

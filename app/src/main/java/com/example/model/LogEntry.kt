@@ -11,18 +11,23 @@ data class LogEntry(
 ) {
     val formattedTime: String
         get() {
-            val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+            val sdf = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
             return sdf.format(Date(timestamp))
         }
 }
 
 enum class LogLevel {
     INFO,
+    DNS,
+    TCP,
+    TLS,
+    AUTH,
+    TUNNEL,
     CONNECTING,
     AUTHENTICATING,
     CONNECTED,
     DISCONNECTED,
-    ERROR,
     WARNING,
+    ERROR,
     TRAFFIC
 }

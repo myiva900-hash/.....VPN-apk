@@ -8,6 +8,10 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import com.example.data.local.CustomServerProfile
+import com.example.data.local.ServerValidationResult
+import com.example.data.local.VpnDatabase
+import com.example.data.security.KeystoreEncryptionHelper
 import com.example.model.AppSettings
 import com.example.model.ConnectionMode
 import com.example.model.LogEntry
@@ -16,15 +20,23 @@ import com.example.model.TrafficStats
 import com.example.model.VpnConfig
 import com.example.model.VpnConnectionState
 import com.example.model.VpnServer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class VpnRepository private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences =
         appContext.getSharedPreferences("mutiganda_vpn_prefs", Context.MODE_PRIVATE)
+
+    private val db = VpnDatabase.getInstance(appContext)
+    private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _connectionState = MutableStateFlow(VpnConnectionState.DISCONNECTED)
     val connectionState: StateFlow<VpnConnectionState> = _connectionState.asStateFlow()
@@ -35,7 +47,7 @@ class VpnRepository private constructor(context: Context) {
     private val _logs = MutableStateFlow<List<LogEntry>>(
         listOf(
             LogEntry(level = LogLevel.INFO, message = "Mutiganda Yvan VPN initialized."),
-            LogEntry(level = LogLevel.INFO, message = "Core tunnel engine ready. Select server to connect.")
+            LogEntry(level = LogLevel.INFO, message = "Custom Server Manager & Android Keystore encryption active.")
         )
     )
     val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
@@ -46,39 +58,93 @@ class VpnRepository private constructor(context: Context) {
     private val _settings = MutableStateFlow(loadSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
-    private val _servers = MutableStateFlow(loadServers())
+    private val _servers = MutableStateFlow<List<VpnServer>>(VpnServer.DEFAULT_SERVERS)
     val servers: StateFlow<List<VpnServer>> = _servers.asStateFlow()
 
     private val _connectionDurationSeconds = MutableStateFlow(0L)
     val connectionDurationSeconds: StateFlow<Long> = _connectionDurationSeconds.asStateFlow()
 
+    // Flag to differentiate between user-initiated disconnect and network drops
+    @Volatile
+    var isManualDisconnect: Boolean = false
+
+    val validationHistory: Flow<List<ServerValidationResult>> =
+        db.serverValidationDao().getAllValidations()
+
+    val customProfiles: Flow<List<CustomServerProfile>> =
+        db.customServerProfileDao().getAllServerProfiles()
+
+    init {
+        // Collect custom servers from Room and merge reactively with default server locations
+        repositoryScope.launch {
+            db.customServerProfileDao().getAllServerProfiles().collect { profiles ->
+                val customServers = profiles.map { it.toVpnServer() }
+                _servers.value = VpnServer.DEFAULT_SERVERS + customServers
+            }
+        }
+    }
+
+    suspend fun saveCustomProfile(profile: CustomServerProfile) {
+        db.customServerProfileDao().insertServerProfile(profile)
+        addLog(
+            LogLevel.INFO,
+            "[PROFILE] Saved server profile '${profile.serverName}' (${profile.hostOrIp}:${profile.port}) [Protocol: ${profile.vpnProtocol}]. Credentials encrypted via Android Keystore."
+        )
+    }
+
+    suspend fun updateCustomProfile(profile: CustomServerProfile) {
+        db.customServerProfileDao().updateServerProfile(profile)
+        addLog(
+            LogLevel.INFO,
+            "[PROFILE] Updated server profile '${profile.serverName}' (${profile.hostOrIp}:${profile.port})."
+        )
+    }
+
+    suspend fun deleteCustomProfile(id: String) {
+        db.customServerProfileDao().deleteServerProfile(id)
+        if (_config.value.selectedServerId == id) {
+            setServer(VpnServer.DEFAULT_SERVERS.first())
+        }
+        addLog(LogLevel.INFO, "[PROFILE] Deleted custom server profile $id from Room database.")
+    }
+
+    suspend fun getCustomProfileById(id: String): CustomServerProfile? {
+        return db.customServerProfileDao().getServerProfileById(id)
+    }
+
+    suspend fun saveValidation(result: ServerValidationResult) {
+        db.serverValidationDao().insertValidation(result)
+    }
+
+    suspend fun clearValidations() {
+        db.serverValidationDao().clearAll()
+    }
+
     fun updateConnectionState(state: VpnConnectionState) {
         _connectionState.value = state
         when (state) {
             VpnConnectionState.CONNECTING -> {
-                addLog(LogLevel.CONNECTING, "Starting connection protocol...")
+                _connectionDurationSeconds.value = 0L
                 triggerFeedback(isConnect = true)
             }
             VpnConnectionState.AUTHENTICATING -> {
-                addLog(LogLevel.AUTHENTICATING, "Authenticating with Mutiganda Yvan VPN gateway...")
+                _connectionDurationSeconds.value = 0L
             }
             VpnConnectionState.ESTABLISHING_TUNNEL -> {
-                addLog(LogLevel.INFO, "Creating secure virtual network interface (TUN)...")
+                _connectionDurationSeconds.value = 0L
             }
             VpnConnectionState.CONNECTED -> {
-                addLog(LogLevel.CONNECTED, "Connected successfully! Tunnel is active and encrypted.")
                 triggerFeedback(isConnect = true)
             }
-            VpnConnectionState.DISCONNECTING -> {
-                addLog(LogLevel.INFO, "Terminating active tunnel...")
-            }
+            VpnConnectionState.DISCONNECTING -> {}
             VpnConnectionState.DISCONNECTED -> {
-                addLog(LogLevel.DISCONNECTED, "VPN disconnected.")
                 _connectionDurationSeconds.value = 0L
+                _trafficStats.value = TrafficStats()
                 triggerFeedback(isConnect = false)
             }
             VpnConnectionState.FAILED -> {
-                addLog(LogLevel.ERROR, "Connection failed or interrupted.")
+                _connectionDurationSeconds.value = 0L
+                _trafficStats.value = TrafficStats()
                 triggerFeedback(isConnect = false)
             }
         }
@@ -89,14 +155,18 @@ class VpnRepository private constructor(context: Context) {
     }
 
     fun updateDuration(seconds: Long) {
-        _connectionDurationSeconds.value = seconds
+        if (seconds in 0..31536000L) {
+            _connectionDurationSeconds.value = seconds
+        } else {
+            _connectionDurationSeconds.value = 0L
+        }
     }
 
     fun addLog(level: LogLevel, message: String) {
         val entry = LogEntry(level = level, message = message)
         val current = _logs.value.toMutableList()
         current.add(entry)
-        if (current.size > 200) {
+        if (current.size > 250) {
             current.removeAt(0)
         }
         _logs.value = current
@@ -111,13 +181,16 @@ class VpnRepository private constructor(context: Context) {
     fun setConnectionMode(mode: ConnectionMode) {
         _config.value = _config.value.copy(connectionMode = mode)
         saveConfig(_config.value)
-        addLog(LogLevel.INFO, "Connection mode changed to: ${mode.title} (${mode.subtitle})")
+        addLog(LogLevel.INFO, "Connection mode set to: ${mode.title} (${mode.subtitle})")
     }
 
     fun setServer(server: VpnServer) {
-        _config.value = _config.value.copy(selectedServerId = server.id)
+        _config.value = _config.value.copy(
+            selectedServerId = server.id,
+            selectedPort = server.supportedPorts.firstOrNull() ?: _config.value.selectedPort
+        )
         saveConfig(_config.value)
-        addLog(LogLevel.INFO, "Selected server: ${server.name} [${server.flag}]")
+        addLog(LogLevel.INFO, "Selected server: ${server.name} [${server.flag}] -> ${server.ip}")
     }
 
     fun setPort(port: Int) {
@@ -145,32 +218,25 @@ class VpnRepository private constructor(context: Context) {
     }
 
     fun addCustomServer(name: String, ip: String, location: String, countryCode: String, port: Int): Boolean {
-        val newServer = VpnServer(
+        val profile = CustomServerProfile(
             id = "custom_" + System.currentTimeMillis(),
-            name = name.ifBlank { "Custom Server" },
+            serverName = name.ifBlank { "Custom Server" },
+            hostOrIp = ip.trim().ifBlank { "127.0.0.1" },
+            port = port,
             location = location.ifBlank { "User Defined" },
-            countryCode = countryCode.ifBlank { "US" },
-            flag = "🛡️",
-            ip = ip.ifBlank { "127.0.0.1" },
-            pingMs = 50,
-            supportedPorts = listOf(port, 80, 443, 8080),
-            isCustom = true
+            countryCode = countryCode.ifBlank { "CUSTOM" },
+            flag = "🛡️"
         )
-        val updated = _servers.value + newServer
-        _servers.value = updated
-        saveServers(updated)
-        addLog(LogLevel.INFO, "Added custom server: ${newServer.name} (${newServer.ip})")
+        repositoryScope.launch {
+            saveCustomProfile(profile)
+        }
         return true
     }
 
     fun removeServer(serverId: String) {
-        val updated = _servers.value.filterNot { it.id == serverId }
-        _servers.value = updated
-        saveServers(updated)
-        if (_config.value.selectedServerId == serverId) {
-            setServer(_servers.value.firstOrNull() ?: VpnServer.DEFAULT_SERVERS.first())
+        repositoryScope.launch {
+            deleteCustomProfile(serverId)
         }
-        addLog(LogLevel.INFO, "Server removed.")
     }
 
     fun exportConfigJson(note: String = "", passwordLocked: Boolean = false): String {
@@ -271,13 +337,13 @@ class VpnRepository private constructor(context: Context) {
         val modeStr = prefs.getString("cfg_mode", ConnectionMode.DIRECT.name) ?: ConnectionMode.DIRECT.name
         val mode = runCatching { ConnectionMode.valueOf(modeStr) }.getOrDefault(ConnectionMode.DIRECT)
         return VpnConfig(
-            selectedServerId = prefs.getString("cfg_server_id", "random") ?: "random",
+            selectedServerId = prefs.getString("cfg_server_id", "rw_gisozi") ?: "rw_gisozi",
             selectedPort = prefs.getInt("cfg_port", 80),
             connectionMode = mode,
             isCustomSetupEnabled = prefs.getBoolean("cfg_custom_setup", false),
             payloadString = prefs.getString("cfg_payload", VpnConfig().payloadString) ?: VpnConfig().payloadString,
             customHostHeader = prefs.getString("cfg_host", "cloudflare.com") ?: "cloudflare.com",
-            customSni = prefs.getString("cfg_sni", "vpn.mutigandayvan.net") ?: "vpn.mutigandayvan.net",
+            customSni = prefs.getString("cfg_sni", "de-fra.vpn.mutigandayvan.net") ?: "de-fra.vpn.mutigandayvan.net",
             tlsVersion = prefs.getString("cfg_tls", "TLS 1.3") ?: "TLS 1.3",
             dnsNameserver = prefs.getString("cfg_dns_ns", "ns1.mutigandavpn.org") ?: "ns1.mutigandavpn.org",
             dnsResolver = prefs.getString("cfg_dns_res", "1.1.1.1") ?: "1.1.1.1"
@@ -309,8 +375,8 @@ class VpnRepository private constructor(context: Context) {
             customDns = prefs.getBoolean("set_custom_dns", false),
             primaryDns = prefs.getString("set_pri_dns", "1.1.1.1") ?: "1.1.1.1",
             secondaryDns = prefs.getString("set_sec_dns", "1.0.0.1") ?: "1.0.0.1",
-            connectionTimeoutSeconds = prefs.getInt("set_timeout", 30),
-            autoReconnect = prefs.getBoolean("set_auto_recon", true)
+            connectionTimeoutSeconds = prefs.getInt("set_timeout", 15),
+            autoReconnect = prefs.getBoolean("set_auto_recon", false)
         )
     }
 
@@ -327,14 +393,6 @@ class VpnRepository private constructor(context: Context) {
             .putInt("set_timeout", s.connectionTimeoutSeconds)
             .putBoolean("set_auto_recon", s.autoReconnect)
             .apply()
-    }
-
-    private fun loadServers(): List<VpnServer> {
-        return VpnServer.DEFAULT_SERVERS
-    }
-
-    private fun saveServers(list: List<VpnServer>) {
-        // Keeps custom servers in memory/preferences
     }
 
     companion object {
